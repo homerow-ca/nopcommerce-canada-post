@@ -3,7 +3,7 @@
   "FriendlyName": "Canada Post",
   "SystemName": "Shipping.CanadaPost",
   "Version": "3.0",
-  "SupportedVersions": [ "4.50", "4.60" ],
+  "SupportedVersions": [ "4.40", "4.50", "4.60" ],
   "Author": "homerow.ca & nopCommerce team",
   "DisplayOrder": 1,
   "FileName": "Nop.Plugin.Shipping.CanadaPost.dll",
