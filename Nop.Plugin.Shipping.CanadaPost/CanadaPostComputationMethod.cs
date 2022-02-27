@@ -2,13 +2,15 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using Nop.Core;
 using Nop.Core.Domain.Shipping;
-using Nop.Core.Plugins;
 using Nop.Services.Configuration;
 using Nop.Services.Directory;
+using Nop.Services.Installation;
 using Nop.Services.Localization;
 using Nop.Services.Logging;
+using Nop.Services.Plugins;
 using Nop.Services.Shipping;
 using Nop.Services.Shipping.Tracking;
 
@@ -29,48 +31,31 @@ namespace Nop.Plugin.Shipping.CanadaPost
         private readonly ISettingService _settingService;
         private readonly IShippingService _shippingService;
         private readonly IWebHelper _webHelper;
+        private readonly ICountryService _countryService;
 
         #endregion
 
         #region Ctor
 
         public CanadaPostComputationMethod(CanadaPostSettings canadaPostSettings,
-            ICurrencyService currencyService,
-            ILocalizationService localizationService,
-            ILogger logger,
-            IMeasureService measureService,
-            ISettingService settingService,
-            IShippingService shippingService,
-            IWebHelper webHelper)
+                                           ICurrencyService currencyService,
+                                           ILocalizationService localizationService,
+                                           ILogger logger,
+                                           IMeasureService measureService,
+                                           ISettingService settingService,
+                                           IShippingService shippingService,
+                                           IWebHelper webHelper,
+                                           ICountryService countryService)
         {
-            this._canadaPostSettings = canadaPostSettings;
-            this._currencyService = currencyService;
-            this._localizationService = localizationService;
-            this._logger = logger;
-            this._measureService = measureService;
-            this._settingService = settingService;
-            this._shippingService = shippingService;
-            this._webHelper = webHelper;
-        }
-
-        #endregion
-
-        #region Properties
-
-        /// <summary>
-        /// Gets a shipping rate computation method type
-        /// </summary>
-        public ShippingRateComputationMethodType ShippingRateComputationMethodType
-        {
-            get { return ShippingRateComputationMethodType.Realtime; }
-        }
-
-        /// <summary>
-        /// Gets a shipment tracker
-        /// </summary>
-        public IShipmentTracker ShipmentTracker
-        {
-            get { return new CanadaPostShipmentTracker(_canadaPostSettings, _logger); }
+            _canadaPostSettings = canadaPostSettings;
+            _currencyService = currencyService;
+            _localizationService = localizationService;
+            _logger = logger;
+            _measureService = measureService;
+            _settingService = settingService;
+            _shippingService = shippingService;
+            _webHelper = webHelper;
+            _countryService = countryService;
         }
 
         #endregion
@@ -82,14 +67,14 @@ namespace Nop.Plugin.Shipping.CanadaPost
         /// </summary>
         /// <param name="getShippingOptionRequest">A request for getting shipping options</param>
         /// <param name="weight">Weight</param>
-        private void GetWeight(GetShippingOptionRequest getShippingOptionRequest, out decimal weight)
+        private async Task<decimal> GetWeight(GetShippingOptionRequest getShippingOptionRequest)
         {
-            var usedMeasureWeight = _measureService.GetMeasureWeightBySystemKeyword("kg");
+            var usedMeasureWeight = await _measureService.GetMeasureWeightBySystemKeywordAsync("kg");
             if (usedMeasureWeight == null)
                 throw new NopException("CanadaPost shipping service. Could not load \"kg\" measure weight");
 
-            weight = _shippingService.GetTotalWeight(getShippingOptionRequest, ignoreFreeShippedItems: true);
-            weight = _measureService.ConvertFromPrimaryMeasureWeight(weight, usedMeasureWeight);
+            var weight = await _shippingService.GetTotalWeightAsync(getShippingOptionRequest, ignoreFreeShippedItems: true);
+            return await _measureService.ConvertFromPrimaryMeasureWeightAsync(weight, usedMeasureWeight);
         }
 
         /// <summary>
@@ -99,20 +84,22 @@ namespace Nop.Plugin.Shipping.CanadaPost
         /// <param name="length">Length</param>
         /// <param name="width">Width</param>
         /// <param name="height">height</param>
-        private void GetDimensions(GetShippingOptionRequest getShippingOptionRequest, out decimal length, out decimal width, out decimal height)
+        private async Task<(decimal length, decimal width, decimal height)> GetDimensions(GetShippingOptionRequest getShippingOptionRequest)
         {
-            var usedMeasureDimension = _measureService.GetMeasureDimensionBySystemKeyword("meters");
+            var usedMeasureDimension = await _measureService.GetMeasureDimensionBySystemKeywordAsync("meters");
             if (usedMeasureDimension == null)
                 throw new NopException("CanadaPost shipping service. Could not load \"meter(s)\" measure dimension");
 
-            _shippingService.GetDimensions(getShippingOptionRequest.Items, out width, out length, out height, true);
+            var (width, length, height) = await _shippingService.GetDimensionsAsync(getShippingOptionRequest.Items, true);
 
             //In the Canada Post API length is longest dimension, width is second longest dimension, height is shortest dimension
             var dimensions = new List<decimal> { length, width, height };
             dimensions.Sort();
-            length = Math.Round(_measureService.ConvertFromPrimaryMeasureDimension(dimensions[2], usedMeasureDimension) * 100, 1);
-            width = Math.Round(_measureService.ConvertFromPrimaryMeasureDimension(dimensions[1], usedMeasureDimension) * 100, 1);
-            height = Math.Round(_measureService.ConvertFromPrimaryMeasureDimension(dimensions[0], usedMeasureDimension) * 100, 1);
+            return (
+                Math.Round(await _measureService.ConvertFromPrimaryMeasureDimensionAsync(dimensions[2], usedMeasureDimension) * 100, 1),
+                Math.Round(await _measureService.ConvertFromPrimaryMeasureDimensionAsync(dimensions[1], usedMeasureDimension) * 100, 1),
+                Math.Round(await _measureService.ConvertFromPrimaryMeasureDimensionAsync(dimensions[0], usedMeasureDimension) * 100, 1)
+            );
         }
 
         /// <summary>
@@ -120,13 +107,13 @@ namespace Nop.Plugin.Shipping.CanadaPost
         /// </summary>
         /// <param name="price">Price in CAD currency</param>
         /// <returns>Price amount</returns>
-        private decimal PriceToPrimaryStoreCurrency(decimal price)
+        private async Task<decimal> PriceToPrimaryStoreCurrency(decimal price)
         {
-            var cad = _currencyService.GetCurrencyByCode("CAD");
+            var cad = await _currencyService.GetCurrencyByCodeAsync("CAD");
             if (cad == null)
                 throw new Exception("CAD currency cannot be loaded");
 
-            return _currencyService.ConvertToPrimaryStoreCurrency(price, cad);
+            return await _currencyService.ConvertToPrimaryStoreCurrencyAsync(price, cad);
         }
         #endregion
 
@@ -137,7 +124,7 @@ namespace Nop.Plugin.Shipping.CanadaPost
         /// </summary>
         /// <param name="getShippingOptionRequest">A request for getting shipping options</param>
         /// <returns>Represents a response of getting shipping rate options</returns>
-        public GetShippingOptionResponse GetShippingOptions(GetShippingOptionRequest getShippingOptionRequest)
+        public async Task<GetShippingOptionResponse> GetShippingOptionsAsync(GetShippingOptionRequest getShippingOptionRequest)
         {
             if (getShippingOptionRequest == null)
                 throw new ArgumentNullException(nameof(getShippingOptionRequest));
@@ -148,14 +135,16 @@ namespace Nop.Plugin.Shipping.CanadaPost
             if (getShippingOptionRequest.ShippingAddress == null)
                 return new GetShippingOptionResponse { Errors = new List<string> { "Shipping address is not set" } };
 
-            if (getShippingOptionRequest.ShippingAddress.Country == null)
+            if (getShippingOptionRequest.ShippingAddress.CountryId == null)
                 return new GetShippingOptionResponse { Errors = new List<string> { "Shipping country is not set" } };
 
             if (string.IsNullOrEmpty(getShippingOptionRequest.ZipPostalCodeFrom))
                 return new GetShippingOptionResponse { Errors = new List<string> { "Origin postal code is not set" } };
 
+            var country = await _countryService.GetCountryByIdAsync((int) getShippingOptionRequest.ShippingAddress.CountryId);
+
             //get available services
-            var availableServices = CanadaPostHelper.GetServices(getShippingOptionRequest.ShippingAddress.Country.TwoLetterIsoCode,
+            var availableServices = CanadaPostHelper.GetServices(country.TwoLetterIsoCode,
                 _canadaPostSettings.ApiKey, _canadaPostSettings.UseSandbox, out string errors);
             if (availableServices == null)
                 return new GetShippingOptionResponse { Errors = new List<string> { errors } };
@@ -163,7 +152,7 @@ namespace Nop.Plugin.Shipping.CanadaPost
             //create object for the get rates requests
             var result = new GetShippingOptionResponse();
             object destinationCountry;
-            switch (getShippingOptionRequest.ShippingAddress.Country.TwoLetterIsoCode.ToLowerInvariant())
+            switch (country.TwoLetterIsoCode.ToLowerInvariant())
             {
                 case "us":
                     destinationCountry = new mailingscenarioDestinationUnitedstates
@@ -180,7 +169,7 @@ namespace Nop.Plugin.Shipping.CanadaPost
                 default:
                     destinationCountry = new mailingscenarioDestinationInternational
                     {
-                        countrycode = getShippingOptionRequest.ShippingAddress.Country.TwoLetterIsoCode
+                        countrycode = country.TwoLetterIsoCode
                     };
                     break;
             }
@@ -205,8 +194,8 @@ namespace Nop.Plugin.Shipping.CanadaPost
             }
 
             //get original parcel characteristics
-            GetWeight(getShippingOptionRequest, out decimal originalWeight);
-            GetDimensions(getShippingOptionRequest, out decimal originalLength, out decimal originalWidth, out decimal originalHeight);
+            var originalWeight = await GetWeight(getShippingOptionRequest);
+            var (originalLength, originalWidth, originalHeight) = await GetDimensions(getShippingOptionRequest);
 
             //get rate for selected services
             var errorSummary = new StringBuilder();
@@ -306,7 +295,7 @@ namespace Nop.Plugin.Shipping.CanadaPost
                             var shippingOption = new ShippingOption
                             {
                                 Name = option.servicename,
-                                Rate = PriceToPrimaryStoreCurrency(option.pricedetails.due * totalParcels)
+                                Rate = await PriceToPrimaryStoreCurrency(option.pricedetails.due * totalParcels)
                             };
                             if (!string.IsNullOrEmpty(option.servicestandard?.expectedtransittime))
                                 shippingOption.Description = $"Delivery in {option.servicestandard.expectedtransittime} days {(totalParcels > 1 ? $"into {totalParcels} parcels" : string.Empty)}";
@@ -322,7 +311,7 @@ namespace Nop.Plugin.Shipping.CanadaPost
             //write errors
             var errorString = errorSummary.ToString();
             if (!string.IsNullOrEmpty(errorString))
-                _logger.Error(errorString);
+                await _logger.ErrorAsync(errorString);
             if (!result.ShippingOptions.Any())
                 result.AddError(errorString);
 
@@ -334,9 +323,14 @@ namespace Nop.Plugin.Shipping.CanadaPost
         /// </summary>
         /// <param name="getShippingOptionRequest">A request for getting shipping options</param>
         /// <returns>Fixed shipping rate; or null in case there's no fixed shipping rate</returns>
-        public decimal? GetFixedRate(GetShippingOptionRequest getShippingOptionRequest)
+        public async Task<decimal?> GetFixedRateAsync(GetShippingOptionRequest getShippingOptionRequest)
         {
             return null;
+        }
+
+        public async Task<IShipmentTracker> GetShipmentTrackerAsync()
+        {
+            return new CanadaPostShipmentTracker(_canadaPostSettings, _logger); 
         }
 
         /// <summary>
@@ -350,53 +344,53 @@ namespace Nop.Plugin.Shipping.CanadaPost
         /// <summary>
         /// Install the plugin
         /// </summary>
-        public override void Install()
+        public override async Task InstallAsync()
         {
             //settings
             var settings = new CanadaPostSettings
             {
                  UseSandbox = true
             };
-            _settingService.SaveSetting(settings);
+            await _settingService.SaveSettingAsync(settings);
 
             //locales
-            _localizationService.AddOrUpdatePluginLocaleResource("Plugins.Shipping.CanadaPost.Fields.Api", "API key");
-            _localizationService.AddOrUpdatePluginLocaleResource("Plugins.Shipping.CanadaPost.Fields.Api.Hint", "Specify Canada Post API key.");
-            _localizationService.AddOrUpdatePluginLocaleResource("Plugins.Shipping.CanadaPost.Fields.ContractId", "Contract ID");
-            _localizationService.AddOrUpdatePluginLocaleResource("Plugins.Shipping.CanadaPost.Fields.ContractId.Hint", "Specify contract identifier.");
-            _localizationService.AddOrUpdatePluginLocaleResource("Plugins.Shipping.CanadaPost.Fields.CustomerNumber", "Customer number");
-            _localizationService.AddOrUpdatePluginLocaleResource("Plugins.Shipping.CanadaPost.Fields.CustomerNumber.Hint", "Specify customer number.");
-            _localizationService.AddOrUpdatePluginLocaleResource("Plugins.Shipping.CanadaPost.Fields.Services", "Available services");
-            _localizationService.AddOrUpdatePluginLocaleResource("Plugins.Shipping.CanadaPost.Fields.Services.Hint", "Select the services you want to offer to customers.");
-            _localizationService.AddOrUpdatePluginLocaleResource("Plugins.Shipping.CanadaPost.Fields.UseSandbox", "Use Sandbox");
-            _localizationService.AddOrUpdatePluginLocaleResource("Plugins.Shipping.CanadaPost.Fields.UseSandbox.Hint", "Check to enable Sandbox (testing environment).");
-            _localizationService.AddOrUpdatePluginLocaleResource("Plugins.Shipping.CanadaPost.Instructions", "<p>To configure plugin follow one of these steps:<br />1. If you are a Canada Post commercial customer, fill Customer number, Contract ID and API key below.<br />2. If you are a Solutions for Small Business customer, specify your Customer number and API key below.<br />3. If you are a non-contracted customer or you want to use the regular price of shipping paid by customers, fill the API key field only.<br /><br /><em>Note: Canada Post gateway returns shipping price in the CAD currency, ensure that you have correctly configured exchange rate from PrimaryStoreCurrency to CAD.</em></p>");
+            await _localizationService.AddOrUpdateLocaleResourceAsync("Plugins.Shipping.CanadaPost.Fields.Api", "API key");
+            await _localizationService.AddOrUpdateLocaleResourceAsync("Plugins.Shipping.CanadaPost.Fields.Api.Hint", "Specify Canada Post API key.");
+            await _localizationService.AddOrUpdateLocaleResourceAsync("Plugins.Shipping.CanadaPost.Fields.ContractId", "Contract ID");
+            await _localizationService.AddOrUpdateLocaleResourceAsync("Plugins.Shipping.CanadaPost.Fields.ContractId.Hint", "Specify contract identifier.");
+            await _localizationService.AddOrUpdateLocaleResourceAsync("Plugins.Shipping.CanadaPost.Fields.CustomerNumber", "Customer number");
+            await _localizationService.AddOrUpdateLocaleResourceAsync("Plugins.Shipping.CanadaPost.Fields.CustomerNumber.Hint", "Specify customer number.");
+            await _localizationService.AddOrUpdateLocaleResourceAsync("Plugins.Shipping.CanadaPost.Fields.Services", "Available services");
+            await _localizationService.AddOrUpdateLocaleResourceAsync("Plugins.Shipping.CanadaPost.Fields.Services.Hint", "Select the services you want to offer to customers.");
+            await _localizationService.AddOrUpdateLocaleResourceAsync("Plugins.Shipping.CanadaPost.Fields.UseSandbox", "Use Sandbox");
+            await _localizationService.AddOrUpdateLocaleResourceAsync("Plugins.Shipping.CanadaPost.Fields.UseSandbox.Hint", "Check to enable Sandbox (testing environment).");
+            await _localizationService.AddOrUpdateLocaleResourceAsync("Plugins.Shipping.CanadaPost.Instructions", "<p>To configure plugin follow one of these steps:<br />1. If you are a Canada Post commercial customer, fill Customer number, Contract ID and API key below.<br />2. If you are a Solutions for Small Business customer, specify your Customer number and API key below.<br />3. If you are a non-contracted customer or you want to use the regular price of shipping paid by customers, fill the API key field only.<br /><br /><em>Note: Canada Post gateway returns shipping price in the CAD currency, ensure that you have correctly configured exchange rate from PrimaryStoreCurrency to CAD.</em></p>");
 
-            base.Install();
+            await base.InstallAsync();
         }
         
         /// <summary>
         /// Uninstall the plugin
         /// </summary>
-        public override void Uninstall()
+        public override async Task UninstallAsync()
         {
             //settings
-            _settingService.DeleteSetting<CanadaPostSettings>();
+            await _settingService.DeleteSettingAsync<CanadaPostSettings>();
 
             //locales
-            _localizationService.DeletePluginLocaleResource("Plugins.Shipping.CanadaPost.Fields.Api");
-            _localizationService.DeletePluginLocaleResource("Plugins.Shipping.CanadaPost.Fields.Api.Hint");
-            _localizationService.DeletePluginLocaleResource("Plugins.Shipping.CanadaPost.Fields.ContractId");
-            _localizationService.DeletePluginLocaleResource("Plugins.Shipping.CanadaPost.Fields.ContractId.Hint");
-            _localizationService.DeletePluginLocaleResource("Plugins.Shipping.CanadaPost.Fields.CustomerNumber");
-            _localizationService.DeletePluginLocaleResource("Plugins.Shipping.CanadaPost.Fields.CustomerNumber.Hint");
-            _localizationService.DeletePluginLocaleResource("Plugins.Shipping.CanadaPost.Fields.Services");
-            _localizationService.DeletePluginLocaleResource("Plugins.Shipping.CanadaPost.Fields.Services.Hint");
-            _localizationService.DeletePluginLocaleResource("Plugins.Shipping.CanadaPost.Fields.UseSandbox");
-            _localizationService.DeletePluginLocaleResource("Plugins.Shipping.CanadaPost.Fields.UseSandbox.Hint");
-            _localizationService.DeletePluginLocaleResource("Plugins.Shipping.CanadaPost.Instructions");
+            await _localizationService.DeleteLocaleResourceAsync("Plugins.Shipping.CanadaPost.Fields.Api");
+            await _localizationService.DeleteLocaleResourceAsync("Plugins.Shipping.CanadaPost.Fields.Api.Hint");
+            await _localizationService.DeleteLocaleResourceAsync("Plugins.Shipping.CanadaPost.Fields.ContractId");
+            await _localizationService.DeleteLocaleResourceAsync("Plugins.Shipping.CanadaPost.Fields.ContractId.Hint");
+            await _localizationService.DeleteLocaleResourceAsync("Plugins.Shipping.CanadaPost.Fields.CustomerNumber");
+            await _localizationService.DeleteLocaleResourceAsync("Plugins.Shipping.CanadaPost.Fields.CustomerNumber.Hint");
+            await _localizationService.DeleteLocaleResourceAsync("Plugins.Shipping.CanadaPost.Fields.Services");
+            await _localizationService.DeleteLocaleResourceAsync("Plugins.Shipping.CanadaPost.Fields.Services.Hint");
+            await _localizationService.DeleteLocaleResourceAsync("Plugins.Shipping.CanadaPost.Fields.UseSandbox");
+            await _localizationService.DeleteLocaleResourceAsync("Plugins.Shipping.CanadaPost.Fields.UseSandbox.Hint");
+            await _localizationService.DeleteLocaleResourceAsync("Plugins.Shipping.CanadaPost.Instructions");
 
-            base.Uninstall();
+            await base.UninstallAsync();
         }
 
         #endregion

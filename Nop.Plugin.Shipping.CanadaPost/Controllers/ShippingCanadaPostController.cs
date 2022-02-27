@@ -1,9 +1,11 @@
 ﻿using System.Linq;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Rendering;
 using Nop.Plugin.Shipping.CanadaPost.Models;
 using Nop.Services.Configuration;
 using Nop.Services.Localization;
+using Nop.Services.Messages;
 using Nop.Services.Security;
 using Nop.Web.Framework;
 using Nop.Web.Framework.Controllers;
@@ -21,29 +23,32 @@ namespace Nop.Plugin.Shipping.CanadaPost.Controllers
         private readonly ILocalizationService _localizationService;
         private readonly IPermissionService _permissionService;
         private readonly ISettingService _settingService;
+        private readonly INotificationService _notificationService;
 
         #endregion
 
         #region Ctor
 
         public ShippingCanadaPostController(CanadaPostSettings canadaPostSettings,
-            ILocalizationService localizationService,
-            IPermissionService permissionService,
-            ISettingService settingService)
+                                            ILocalizationService localizationService,
+                                            IPermissionService permissionService,
+                                            ISettingService settingService,
+                                            INotificationService notificationService)
         {
-            this._canadaPostSettings = canadaPostSettings;
-            this._localizationService = localizationService;
-            this._permissionService = permissionService;
-            this._settingService = settingService;            
+            _canadaPostSettings = canadaPostSettings;
+            _localizationService = localizationService;
+            _permissionService = permissionService;
+            _settingService = settingService;
+            _notificationService = notificationService;
         }
 
         #endregion
 
         #region Methods
 
-        public IActionResult Configure()
+        public async Task<IActionResult> Configure()
         {
-            if (!_permissionService.Authorize(StandardPermissionProvider.ManageShippingSettings))
+            if (! await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageShippingSettings))
                 return AccessDeniedView();
 
             var model = new CanadaPostShippingModel()
@@ -71,14 +76,13 @@ namespace Nop.Plugin.Shipping.CanadaPost.Controllers
         }
 
         [HttpPost]
-        [AdminAntiForgery]
-        public IActionResult Configure(CanadaPostShippingModel model)
+        public async Task<IActionResult> Configure(CanadaPostShippingModel model)
         {
-            if (!_permissionService.Authorize(StandardPermissionProvider.ManageShippingSettings))
+            if (! await _permissionService.AuthorizeAsync(StandardPermissionProvider.ManageShippingSettings))
                 return AccessDeniedView();
 
             if (!ModelState.IsValid)
-                return Configure();
+                return await Configure();
 
             //Canada Post page provides the API key with extra spaces
             model.ApiKey = model.ApiKey?.Replace(" : ", ":");
@@ -89,11 +93,11 @@ namespace Nop.Plugin.Shipping.CanadaPost.Controllers
             _canadaPostSettings.ApiKey = model.ApiKey;
             _canadaPostSettings.UseSandbox = model.UseSandbox;
             _canadaPostSettings.SelectedServicesCodes = model.SelectedServicesCodes.ToList();
-            _settingService.SaveSetting(_canadaPostSettings);
+            await _settingService.SaveSettingAsync(_canadaPostSettings);
 
-            SuccessNotification(_localizationService.GetResource("Admin.Plugins.Saved"));
+            _notificationService.SuccessNotification(await _localizationService.GetResourceAsync("Admin.Plugins.Saved"));
 
-            return Configure();
+            return await Configure();
         }
 
         #endregion

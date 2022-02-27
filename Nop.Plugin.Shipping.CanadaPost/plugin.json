@@ -2,9 +2,9 @@
   "Group": "Shipping rate computation",
   "FriendlyName": "Canada Post",
   "SystemName": "Shipping.CanadaPost",
-  "Version": "2.14",
-  "SupportedVersions": [ "4.10" ],
-  "Author": "nopCommerce team",
+  "Version": "3.0",
+  "SupportedVersions": [ "4.50", "4.60" ],
+  "Author": "homerow.ca & nopCommerce team",
   "DisplayOrder": 1,
   "FileName": "Nop.Plugin.Shipping.CanadaPost.dll",
   "Description": "This plugin offers shipping rates by Canada Post"

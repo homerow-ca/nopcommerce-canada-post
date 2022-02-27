@@ -1,5 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
+using Nop.Core.Domain.Shipping;
 using Nop.Services.Logging;
 using Nop.Services.Shipping.Tracking;
 
@@ -46,7 +48,7 @@ namespace Nop.Plugin.Shipping.CanadaPost
         /// </summary>
         /// <param name="trackingNumber">The tracking number to track.</param>
         /// <returns>URL of a tracking page.</returns>
-        public virtual string GetUrl(string trackingNumber)
+        public virtual async Task<string> GetUrlAsync(string trackingNumber, Shipment shipment = null)
         {
             string url = "http://www.canadapost.ca/cpotools/apps/track/personal/findByTrackNumber?trackingNumber={0}&LOCALE=en";
             url = string.Format(url, trackingNumber);
@@ -58,14 +60,14 @@ namespace Nop.Plugin.Shipping.CanadaPost
         /// </summary>
         /// <param name="trackingNumber">The tracking number to track</param>
         /// <returns>List of Shipment Events.</returns>
-        public virtual IList<ShipmentStatusEvent> GetShipmentEvents(string trackingNumber)
+        public virtual async Task<IList<ShipmentStatusEvent>> GetShipmentEventsAsync(string trackingNumber, Shipment shipment = null)
         {
             var trackingDetails = CanadaPostHelper.GetTrackingDetails(trackingNumber,
                 _canadaPostSettings.ApiKey, _canadaPostSettings.UseSandbox, out string errors);
 
             if (trackingDetails == null)
             {
-                _logger.Error(errors);
+                await _logger.ErrorAsync(errors);
                 return new List<ShipmentStatusEvent>();
             }
 

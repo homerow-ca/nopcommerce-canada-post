@@ -5,7 +5,7 @@ using Nop.Web.Framework.Mvc.ModelBinding;
 
 namespace Nop.Plugin.Shipping.CanadaPost.Models
 {
-    public class CanadaPostShippingModel : BaseNopModel
+    public record CanadaPostShippingModel : BaseNopModel
     {
         public CanadaPostShippingModel()
         {
